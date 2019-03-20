@@ -22,7 +22,7 @@
     "/>
     <script src="json2.js"></script>
   </head> 
-  <body bgcolor="white" height="100%" width="100%"> 
+  <body bgcolor="#333" height="100%" width="100%"> 
     <div id="debug"></div>
     <canvas id="c" width="100%" height="100%" style="-webkit-tap-highlight-color: transparent;"></canvas> 
 
@@ -30,19 +30,101 @@
       // Fix me
 var canvas = document.getElementById('c');
 var host = window.location.host;
+
 var context = canvas.getContext("2d");
 var W = canvas.width  = window.innerWidth-6;
 var H = canvas.height = window.innerHeight-50;
 var wscounter = 0;
 var socket;
+world = {};
+
+// global variables for color of the pen
+client_id = -1;
+client_id = 0;
+color_keys = [];
+client_color = getRandomColor();
+
+// get client id from server
+fetchJSON("/give-me-id").then(function (json){client_id = json.id;});
 
 function debug(str) {
     var debugDiv = document.getElementById('debug');
     debugDiv.innerHTML = "" + str;
 }
-debug("Test");
 
-world = {};
+// send XMLHTTP request. In this project, this is only used for getting the world before connection
+function sendJSONXMLHTTPRequest(url, objects, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState==4) {
+            try {
+                if (xhr.status==200) {
+                    //XXX: parse some JSON from the request! 
+                    //XXX: Pass the data to the callback!
+                    callback(JSON.parse(xhr.responseText));
+                }
+            } 
+            catch(e) {
+                alert('Error: ' + e.name);
+            }
+        }
+    };
+    //XXX: POST to a URL
+    //XXX: set the mimetype and the accept headers!
+    // Remember to use application/json !
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.send(JSON.stringify(objects));
+}
+
+// Copied from last assignment
+function variantRandomColorKey(){
+    var keys = [];
+    for (var i=0; i < 6; i++){
+        keys[i] = color_keys[i] + Math.floor(Math.random() * 3) - 1;
+        keys[i] = Math.min(7,keys[i]);
+        keys[i] = Math.max(0,keys[i]);
+    }
+    return keys;
+}
+
+// Copied from last assignment
+function getRandomColorKey(){
+    for (var i=0; i < 6; i++){
+        color_keys[i] = Math.floor(Math.random() * 8);
+    }
+}
+
+// Copied from last assignment
+function getColor(keys){
+    var colorRange = '89ABCDEF';
+    var colorLetter = '#';
+    for (var i=0; i < 6; i++){
+        colorLetter += colorRange[keys[i]];
+    }
+    return colorLetter;
+}
+
+// Get a random color for each client. Note that only light color is assigned.
+// Reference: https://stackoverflow.com/questions/1484506/random-color-generator
+function getRandomColor(){
+    getRandomColorKey();
+    return getColor(color_keys);
+}
+
+// Copied from last assignment
+function fetchJSON(url){
+    var request = new Request(url);
+    return fetch(request).then((response) => {
+        if (response.status === 200){
+            return response.json();
+        }else {
+            alert("Cannot connect to the server.")
+        }
+    })
+}
+
 
 //XXX: TODO Make this prettier!
 function drawCircle(context,entity) {
@@ -72,7 +154,7 @@ function prepEntity(entity) {
 function clearFrame() {
     with(context) {
 	moveTo(0,0);
-	fillStyle = "#000";
+	fillStyle = "#333";
 	fillRect(0,0,W,H);
     }
 
@@ -121,15 +203,18 @@ function getPosition(e) {
 	}
 }
 
-function addEntity(entity, data) {
+function addEntity(entity, client_id, data) {
     world[entity] = data;
     drawNextFrame(); // (but should we?)
-    //XXX: Send a XHTML Request that updates the entity you just modified!
+    //XXX: Send a socket Request that updates the entity you just modified!
+    request_body = "{\""+entity+ "\":"+JSON.stringify(data)+"}";
+
+    socket.send(request_body)
 }
 var counter = 0;
 function addEntityWithoutName(data) {
-    var name = "X"+(counter++)%100;
-    addEntity(name,data);
+    var entity = client_id+ "-" + (counter++)%200;
+    addEntity(entity, client_id, data);
 }
 
 // canvas + mouse/touch is complicated 
@@ -231,16 +316,21 @@ mouse = (function() {
 // Add the application specific mouse listeners!
 //XXX: TODO Make these prettier!
 mouse.mousedowners.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'blue'});
+    var colorKey = variantRandomColorKey();
+    var color = getColor(colorKey);
+    addEntityWithoutName({'x':x,'y':y,'colour':color,'radius':10});
 });
 
 mouse.mouseuppers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'red'});
+    var colorKey = variantRandomColorKey();
+    var color = getColor(colorKey);
+    addEntityWithoutName({'x':x,'y':y,'colour':color,'radius':10});
 });
 
 mouse.mousedraggers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'green',
-                          'radius':10});
+    var colorKey = variantRandomColorKey();
+    var color = getColor(colorKey);
+    addEntityWithoutName({'x':x,'y':y,'colour':color, 'radius':10});
 });
 
 
@@ -253,15 +343,29 @@ function wsSetup() {
     var url = "ws://"+host+"/subscribe";   
     socket = new WebSocket(url);
     socket.onopen = function() {
-        //XXX: TODO What are you going to do here?
+        // get the entire world before connected
+        var url = '/world';
+        var objects = {};
+        var callback = function(objects){
+            world = objects;
+            drawNextFrame();
+        }
+        sendJSONXMLHTTPRequest(url, objects, callback);
     };
+    
+
     socket.onerror = function(msg) {
         debug("WebSocket Error:" + msg.data);
     };
     socket.onmessage = function(msg) {  
         try {
-            debug("WebSocket Recv:" + msg.data);
-            //XXX: TODO What are you going to do here?            
+            //XXX: TODO What are you going to do here? 
+            var entity = JSON.parse(msg.data);
+            for(i in entity){
+                console.log(entity[i])
+                world[i] = entity[i]
+            }
+            drawNextFrame();
         } catch (e) {
             alert("socket on message: " + e);
         }
@@ -269,9 +373,6 @@ function wsSetup() {
 }
 
 wsSetup();
-
-
-
 
 // 30 frames per second
 setInterval( update, 1000/30.0);
