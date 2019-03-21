@@ -99,7 +99,7 @@ myWorld.add_set_listener( set_listener )
 @app.route('/')
 def hello():
     '''Return something coherent here.. perhaps redirect to /static/index.html '''
-    return redirect("./static/index.html", code=301)
+    return redirect("./static/index.html", code=302)
 
 def update_world(entity):
     # do post
